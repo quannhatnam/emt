@@ -78,16 +78,48 @@ const LoginPage: React.FC = () => {
       const msalInstance = createMsalInstance(ssoConfig.client_id, ssoConfig.tenant_id);
       await msalInstance.initialize();
       const msalResponse = await msalInstance.loginPopup(loginRequest);
-      if (msalResponse.accessToken) {
-        const result = await loginSSO(msalResponse.accessToken);
+
+      // Get the access token — loginPopup may or may not include it
+      let accessToken = msalResponse.accessToken;
+
+      // If no access token in the popup response, acquire it silently
+      if (!accessToken && msalResponse.account) {
+        try {
+          const tokenResponse = await msalInstance.acquireTokenSilent({
+            ...loginRequest,
+            account: msalResponse.account,
+          });
+          accessToken = tokenResponse.accessToken;
+        } catch {
+          // If silent acquisition fails, try popup
+          const tokenResponse = await msalInstance.acquireTokenPopup(loginRequest);
+          accessToken = tokenResponse.accessToken;
+        }
+      }
+
+      if (accessToken) {
+        const result = await loginSSO(accessToken);
         handleSuccess(result);
+      } else {
+        setError('Microsoft sign-in succeeded but no access token was received. Check your Azure app API permissions (User.Read).');
       }
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as any;
-        setError(axiosErr.response?.data?.detail || 'SSO login failed.');
+        const detail = axiosErr.response?.data?.detail || '';
+        if (detail.includes('unable to verify')) {
+          setError('SSO login failed: Could not verify your Microsoft token. Ensure the Azure app has User.Read permission and admin consent is granted.');
+        } else {
+          setError(detail || 'SSO login failed.');
+        }
       } else if (err instanceof Error) {
-        if (!err.message.includes('user_cancelled')) {
+        if (err.message.includes('user_cancelled') || err.message.includes('user_denied')) {
+          // User closed the popup — no error
+        } else if (err.message.includes('redirect_uri')) {
+          setError(`Microsoft sign-in failed: Redirect URI mismatch. In Azure Portal, add "${window.location.origin}" as a SPA redirect URI.`);
+        } else if (err.message.includes('AADSTS')) {
+          setError(`Microsoft sign-in failed: ${err.message.split('.')[0]}.`);
+        } else {
           setError(`Microsoft sign-in failed: ${err.message}`);
         }
       }

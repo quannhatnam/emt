@@ -175,12 +175,7 @@ const DeviceDetailPage: React.FC = () => {
           <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
             {boolChip(device.encryption_enabled, 'Encryption')}
             {boolChip(device.firewall_enabled, 'Firewall')}
-            <Chip
-              label={device.antivirus_status || 'Antivirus: N/A'}
-              size="small"
-              variant="outlined"
-              color={device.antivirus_status === 'active' ? 'success' : 'default'}
-            />
+            {boolChip(device.antivirus_active, 'Antivirus')}
           </Box>
         </CardContent>
       </Card>

@@ -320,11 +320,18 @@ const SettingsPage: React.FC = () => {
                 )}
               </Box>
 
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Enable Microsoft SSO so users can sign in with their organizational accounts.
-                Register an app in Azure Portal &gt; App Registrations, set the redirect URI
-                to your app URL, and add the User.Read API permission.
               </Typography>
+              <Box sx={{ mb: 2, p: 1.5, borderRadius: 1, bgcolor: '#f0f6ff', border: '1px solid #d0e0f0' }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>Azure Portal Setup:</Typography>
+                <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.8 }}>
+                  1. Go to Azure Portal &gt; App Registrations &gt; New Registration<br />
+                  2. Set <strong>Redirect URI</strong> (SPA): <code style={{ background: '#e8e8e8', padding: '1px 4px', borderRadius: 3 }}>{window.location.origin}</code><br />
+                  3. Under API Permissions, add <strong>Microsoft Graph &gt; User.Read</strong> (delegated)<br />
+                  4. Copy the Application (Client) ID and Directory (Tenant) ID below
+                </Typography>
+              </Box>
 
               {(!ssoConfig?.configured || ssoEditing) ? (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 500 }}>

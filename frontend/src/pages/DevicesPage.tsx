@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -40,16 +40,22 @@ const sourceColor = (source: string): string => {
   }
 };
 
+const securityStatusChip = (value: boolean | null | undefined, enabledLabel: string, disabledLabel: string) => {
+  if (value === true) return <Chip label={enabledLabel} size="small" color="success" variant="outlined" sx={{ fontSize: '0.7rem' }} />;
+  if (value === false) return <Chip label={disabledLabel} size="small" color="error" variant="outlined" sx={{ fontSize: '0.7rem' }} />;
+  return <Chip label="Unknown" size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />;
+};
+
 const columns: GridColDef[] = [
   { field: 'hostname', headerName: 'Hostname', flex: 1, minWidth: 150 },
   { field: 'serial_number', headerName: 'Serial', flex: 1, minWidth: 120 },
-  { field: 'platform', headerName: 'Platform', width: 110 },
-  { field: 'os_version', headerName: 'OS Version', flex: 1, minWidth: 130 },
+  { field: 'platform', headerName: 'Platform', width: 100 },
+  { field: 'os_version', headerName: 'OS Version', flex: 1, minWidth: 120 },
   { field: 'assigned_user', headerName: 'User', flex: 1, minWidth: 120 },
   {
     field: 'compliance_status',
     headerName: 'Compliance',
-    width: 140,
+    width: 130,
     renderCell: (params) => (
       <Chip
         label={params.value || 'Unknown'}
@@ -60,9 +66,27 @@ const columns: GridColDef[] = [
     ),
   },
   {
+    field: 'encryption_enabled',
+    headerName: 'Encryption',
+    width: 110,
+    renderCell: (params) => securityStatusChip(params.value, 'On', 'Off'),
+  },
+  {
+    field: 'firewall_enabled',
+    headerName: 'Firewall',
+    width: 100,
+    renderCell: (params) => securityStatusChip(params.value, 'On', 'Off'),
+  },
+  {
+    field: 'antivirus_active',
+    headerName: 'Antivirus',
+    width: 100,
+    renderCell: (params) => securityStatusChip(params.value, 'Active', 'Off'),
+  },
+  {
     field: 'source',
     headerName: 'Source',
-    width: 110,
+    width: 100,
     renderCell: (params) => (
       <Chip
         label={params.value}
@@ -77,7 +101,7 @@ const columns: GridColDef[] = [
   {
     field: 'last_checkin',
     headerName: 'Last Check-in',
-    width: 170,
+    width: 160,
     valueFormatter: (value: string) =>
       value ? new Date(value).toLocaleString() : 'N/A',
   },
@@ -85,6 +109,7 @@ const columns: GridColDef[] = [
 
 const DevicesPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<DeviceListResponse>({
     items: [],
     total: 0,
@@ -93,9 +118,12 @@ const DevicesPage: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [source, setSource] = useState('');
-  const [platform, setPlatform] = useState('');
-  const [compliance, setCompliance] = useState('');
+  const [source, setSource] = useState(searchParams.get('source') || '');
+  const [platform, setPlatform] = useState(searchParams.get('platform') || '');
+  const [compliance, setCompliance] = useState(searchParams.get('compliance_status') || '');
+  const [encryptionFilter, setEncryptionFilter] = useState(searchParams.get('encryption_enabled') || '');
+  const [firewallFilter, setFirewallFilter] = useState(searchParams.get('firewall_enabled') || '');
+  const [antivirusFilter, setAntivirusFilter] = useState(searchParams.get('antivirus_active') || '');
   const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
     page: 0,
     pageSize: 25,
@@ -109,6 +137,9 @@ const DevicesPage: React.FC = () => {
         source: source || undefined,
         platform: platform || undefined,
         compliance_status: compliance || undefined,
+        encryption_enabled: encryptionFilter === '' ? undefined : encryptionFilter === 'true',
+        firewall_enabled: firewallFilter === '' ? undefined : firewallFilter === 'true',
+        antivirus_active: antivirusFilter === '' ? undefined : antivirusFilter === 'true',
         skip: paginationModel.page * paginationModel.pageSize,
         limit: paginationModel.pageSize,
       });
@@ -118,7 +149,7 @@ const DevicesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, source, platform, compliance, paginationModel]);
+  }, [search, source, platform, compliance, encryptionFilter, firewallFilter, antivirusFilter, paginationModel]);
 
   useEffect(() => {
     fetchDevices();
@@ -187,7 +218,6 @@ const DevicesPage: React.FC = () => {
             <MenuItem value="">All</MenuItem>
             <MenuItem value="intune">Intune</MenuItem>
             <MenuItem value="kandji">Kandji</MenuItem>
-            <MenuItem value="qualys">Qualys</MenuItem>
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -216,6 +246,42 @@ const DevicesPage: React.FC = () => {
             <MenuItem value="compliant">Compliant</MenuItem>
             <MenuItem value="non_compliant">Non-Compliant</MenuItem>
             <MenuItem value="unknown">Unknown</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Encryption</InputLabel>
+          <Select
+            value={encryptionFilter}
+            label="Encryption"
+            onChange={(e) => setEncryptionFilter(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="true">Enabled</MenuItem>
+            <MenuItem value="false">Disabled</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>Firewall</InputLabel>
+          <Select
+            value={firewallFilter}
+            label="Firewall"
+            onChange={(e) => setFirewallFilter(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="true">Enabled</MenuItem>
+            <MenuItem value="false">Disabled</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>Antivirus</InputLabel>
+          <Select
+            value={antivirusFilter}
+            label="Antivirus"
+            onChange={(e) => setAntivirusFilter(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="true">Active</MenuItem>
+            <MenuItem value="false">Inactive</MenuItem>
           </Select>
         </FormControl>
       </Box>

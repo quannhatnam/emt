@@ -14,9 +14,9 @@ export interface Device {
   compliance_status: string;
   last_checkin: string;
   source: string;
-  encryption_enabled: boolean;
-  firewall_enabled: boolean;
-  antivirus_status: string;
+  encryption_enabled: boolean | null;
+  firewall_enabled: boolean | null;
+  antivirus_active: boolean | null;
   ip_address: string;
   mac_address: string;
   apps: AppInfo[];

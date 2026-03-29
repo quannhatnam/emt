@@ -18,12 +18,9 @@ import {
   TableHead,
   TableRow,
   Typography,
-  Paper,
   LinearProgress,
   ToggleButton,
   ToggleButtonGroup,
-  Divider,
-  Tooltip as MuiTooltip,
 } from '@mui/material';
 import DevicesIcon from '@mui/icons-material/Devices';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -36,7 +33,6 @@ import ShieldIcon from '@mui/icons-material/Shield';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AppsIcon from '@mui/icons-material/Apps';
-import DownloadIcon from '@mui/icons-material/Download';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import TimerIcon from '@mui/icons-material/Timer';
@@ -78,7 +74,6 @@ import {
   Device,
   AppSummary,
   generateReports,
-  GenerateReportsResponse,
 } from '../services/api';
 
 // --- Color Constants ---
@@ -120,10 +115,11 @@ interface KpiCardProps {
   loading: boolean;
   subtitle?: string;
   trend?: { direction: 'up' | 'down' | 'flat'; label: string };
+  onClick?: () => void;
 }
 
-const KpiCard: React.FC<KpiCardProps> = ({ icon, value, label, color, loading, subtitle, trend }) => (
-  <Card sx={{ height: '100%' }}>
+const KpiCard: React.FC<KpiCardProps> = ({ icon, value, label, color, loading, subtitle, trend, onClick }) => (
+  <Card sx={{ height: '100%', cursor: onClick ? 'pointer' : 'default', '&:hover': onClick ? { boxShadow: 4, transform: 'translateY(-1px)', transition: 'all 0.2s' } : {} }} onClick={onClick}>
     <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2.5, '&:last-child': { pb: 2.5 } }}>
       <Box sx={{ backgroundColor: `${color}15`, borderRadius: 2, p: 1.5, display: 'flex', color }}>
         {icon}
@@ -151,9 +147,10 @@ interface PostureBarProps {
   unknown: number;
   total: number;
   loading: boolean;
+  onClickDisabled?: () => void;
 }
 
-const PostureBar: React.FC<PostureBarProps> = ({ label, icon, enabled, disabled, unknown, total, loading }) => {
+const PostureBar: React.FC<PostureBarProps> = ({ label, icon, enabled, disabled, unknown, total, loading, onClickDisabled }) => {
   const pct = total > 0 ? (enabled / total) * 100 : 0;
   const color = pct >= 90 ? '#388e3c' : pct >= 70 ? '#f57c00' : '#d32f2f';
   return (
@@ -185,32 +182,19 @@ const PostureBar: React.FC<PostureBarProps> = ({ label, icon, enabled, disabled,
           />
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
             <Typography variant="caption" color="text.secondary">
-              {enabled} enabled · {disabled} disabled{unknown > 0 ? ` · ${unknown} unknown` : ''}
+              {enabled} enabled ·{' '}
+              {disabled > 0 && onClickDisabled ? (
+                <Box component="span" sx={{ color: '#d32f2f', cursor: 'pointer', textDecoration: 'underline', '&:hover': { color: '#b71c1c' } }} onClick={onClickDisabled}>
+                  {disabled} disabled
+                </Box>
+              ) : (
+                <>{disabled} disabled</>
+              )}
+              {unknown > 0 ? ` · ${unknown} unknown` : ''}
             </Typography>
           </Box>
         </Box>
       )}
-    </Box>
-  );
-};
-
-// Mini donut for inline display
-const MiniDonut: React.FC<{ value: number; total: number; color: string; size?: number }> = ({ value, total, color, size = 48 }) => {
-  const pct = total > 0 ? (value / total) * 100 : 0;
-  const data = [
-    { name: 'filled', value: pct },
-    { name: 'empty', value: 100 - pct },
-  ];
-  return (
-    <Box sx={{ width: size, height: size }}>
-      <ResponsiveContainer>
-        <PieChart>
-          <Pie data={data} cx="50%" cy="50%" innerRadius={size * 0.3} outerRadius={size * 0.45} dataKey="value" startAngle={90} endAngle={-270} stroke="none">
-            <Cell fill={color} />
-            <Cell fill="#e0e0e0" />
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
     </Box>
   );
 };
@@ -288,6 +272,7 @@ interface AttentionItem {
   severity: 'critical' | 'warning' | 'info';
   message: string;
   category: string;
+  link?: string;
 }
 
 function buildAttentionItems(
@@ -313,17 +298,17 @@ function buildAttentionItems(
 
   // Encryption gaps
   if (posture && posture.encryption_disabled > 0) {
-    items.push({ severity: 'critical', message: `${posture.encryption_disabled} devices have disk encryption disabled`, category: 'Security' });
+    items.push({ severity: 'critical', message: `${posture.encryption_disabled} devices have disk encryption disabled`, category: 'Security', link: '/devices?encryption_enabled=false' });
   }
 
   // Firewall gaps
   if (posture && posture.firewall_disabled > 0) {
-    items.push({ severity: 'warning', message: `${posture.firewall_disabled} devices have firewall disabled`, category: 'Security' });
+    items.push({ severity: 'warning', message: `${posture.firewall_disabled} devices have firewall disabled`, category: 'Security', link: '/devices?firewall_enabled=false' });
   }
 
   // Antivirus gaps
   if (posture && posture.antivirus_inactive > 0) {
-    items.push({ severity: 'warning', message: `${posture.antivirus_inactive} devices have antivirus inactive`, category: 'Security' });
+    items.push({ severity: 'warning', message: `${posture.antivirus_inactive} devices have antivirus inactive`, category: 'Security', link: '/devices?antivirus_active=false' });
   }
 
   // OS critically outdated
@@ -348,18 +333,19 @@ function buildAttentionItems(
       severity: summary.stale_devices > 10 ? 'warning' : 'info',
       message: `${summary.stale_devices} devices haven't checked in for 7+ days`,
       category: 'Device',
+      link: '/devices?compliance_status=unknown',
     });
   }
 
   // High avg patch days
   if (summary.avg_patch_days > 14) {
-    items.push({ severity: 'warning', message: `Average device check-in gap is ${summary.avg_patch_days} days — indicates stale fleet data`, category: 'Device' });
+    items.push({ severity: 'warning', message: `Average device check-in gap is ${summary.avg_patch_days} days — indicates stale fleet data`, category: 'Device', link: '/devices' });
   }
 
   // Non-compliant devices
   if (summary.non_compliant_count > 0) {
     const pct = summary.total_devices > 0 ? ((summary.non_compliant_count / summary.total_devices) * 100).toFixed(0) : '0';
-    items.push({ severity: summary.non_compliant_count > summary.total_devices * 0.2 ? 'critical' : 'warning', message: `${summary.non_compliant_count} devices (${pct}%) are non-compliant with MDM policies`, category: 'Compliance' });
+    items.push({ severity: summary.non_compliant_count > summary.total_devices * 0.2 ? 'critical' : 'warning', message: `${summary.non_compliant_count} devices (${pct}%) are non-compliant with MDM policies`, category: 'Compliance', link: '/devices?compliance_status=non_compliant' });
   }
 
   // Unmanaged apps
@@ -367,9 +353,9 @@ function buildAttentionItems(
     const totalApps = appSummary.managed_count + appSummary.unmanaged_count;
     const unmanagedPct = totalApps > 0 ? ((appSummary.unmanaged_count / totalApps) * 100).toFixed(0) : '0';
     if (appSummary.unmanaged_count > appSummary.managed_count) {
-      items.push({ severity: 'warning', message: `${appSummary.unmanaged_count} unmanaged apps (${unmanagedPct}%) — potential shadow IT risk`, category: 'Application' });
+      items.push({ severity: 'warning', message: `${appSummary.unmanaged_count} unmanaged apps (${unmanagedPct}%) — potential shadow IT risk`, category: 'Application', link: '/applications' });
     } else {
-      items.push({ severity: 'info', message: `${appSummary.unmanaged_count} unmanaged apps detected across fleet`, category: 'Application' });
+      items.push({ severity: 'info', message: `${appSummary.unmanaged_count} unmanaged apps detected across fleet`, category: 'Application', link: '/applications' });
     }
   }
 
@@ -377,7 +363,7 @@ function buildAttentionItems(
   const failedSyncs = syncLogs.filter((l) => l.status === 'failed');
   if (failedSyncs.length > 0) {
     const providers = Array.from(new Set(failedSyncs.map((l) => l.provider))).join(', ');
-    items.push({ severity: 'warning', message: `Recent sync failure for ${providers} — data may be stale`, category: 'Sync' });
+    items.push({ severity: 'warning', message: `Recent sync failure for ${providers} — data may be stale`, category: 'Sync', link: '/settings' });
   }
 
   return items.sort((a, b) => {
@@ -388,7 +374,9 @@ function buildAttentionItems(
 
 // --- Main Component ---
 const DashboardPage: React.FC = () => {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [osDistribution, setOsDistribution] = useState<OsDistribution[]>([]);
   const [vulnSummary, setVulnSummary] = useState<VulnerabilitySummary | null>(null);
   const [staleDevices, setStaleDevices] = useState<Device[]>([]);
@@ -469,8 +457,9 @@ const DashboardPage: React.FC = () => {
   const healthScore = computeHealthScore(summary, vulnSummary, posture, osCurrency, appSummary);
   const health = getHealthLabel(healthScore);
 
+  const SOURCE_LABELS: Record<string, string> = { intune: 'Intune', kandji: 'Kandji', qualys: 'Qualys' };
   const sourceData = summary
-    ? Object.entries(summary.source_distribution || {}).map(([name, value]) => ({ name, value }))
+    ? Object.entries(summary.source_distribution || {}).map(([name, value]) => ({ name: SOURCE_LABELS[name.toLowerCase()] || name.charAt(0).toUpperCase() + name.slice(1), value }))
     : [];
 
   const platformData = summary
@@ -498,7 +487,8 @@ const DashboardPage: React.FC = () => {
       ]
     : [];
 
-  // App management bar data
+  // App management bar data (used for possible future charts)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const appMgmtData = appSummary
     ? [
         { name: 'Managed', value: appSummary.managed_count, fill: '#388e3c' },
@@ -581,10 +571,10 @@ const DashboardPage: React.FC = () => {
       {/* ===== KPI CARDS (6 columns on large screens) ===== */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<DevicesIcon fontSize="large" />} value={summary?.total_devices ?? 0} label="Total Devices" color="#1a237e" loading={loading} subtitle={sourceData.map((s) => `${s.name}: ${s.value}`).join(' · ')} />
+          <KpiCard icon={<DevicesIcon fontSize="large" />} value={summary?.total_devices ?? 0} label="Total Devices" color="#1a237e" loading={loading} subtitle={sourceData.map((s) => `${s.name}: ${s.value}`).join(' · ')} onClick={() => navigate('/devices')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<CheckCircleIcon fontSize="large" />} value={summary && summary.total_devices > 0 ? `${((summary.compliant_count / summary.total_devices) * 100).toFixed(1)}%` : '0%'} label="Compliance Rate" color="#388e3c" loading={loading} subtitle={summary ? `${summary.compliant_count} of ${summary.total_devices}` : undefined} />
+          <KpiCard icon={<CheckCircleIcon fontSize="large" />} value={summary && summary.total_devices > 0 ? `${((summary.compliant_count / summary.total_devices) * 100).toFixed(1)}%` : '0%'} label="Compliance Rate" color="#388e3c" loading={loading} subtitle={summary ? `${summary.compliant_count} of ${summary.total_devices}` : undefined} onClick={() => navigate('/devices?compliance_status=non_compliant')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
           <KpiCard icon={<SystemUpdateIcon fontSize="large" />} value={osCurrency ? `${osCurrency.overall_currency_pct}%` : '0%'} label="OS Currency" color="#1565c0" loading={loading} subtitle="Devices on latest OS" />
@@ -593,10 +583,10 @@ const DashboardPage: React.FC = () => {
           <KpiCard icon={<BugReportIcon fontSize="large" />} value={summary?.critical_vulns ?? 0} label="Critical Vulns" color="#d32f2f" loading={loading} subtitle={vulnSummary ? `${vulnSummary.high} high · ${vulnSummary.medium} med` : undefined} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<AppsIcon fontSize="large" />} value={`${managedPct}%`} label="App Coverage" color="#7b1fa2" loading={loading} subtitle={appSummary ? `${appSummary.managed_count} managed · ${appSummary.unmanaged_count} unmanaged` : undefined} />
+          <KpiCard icon={<AppsIcon fontSize="large" />} value={`${managedPct}%`} label="App Coverage" color="#7b1fa2" loading={loading} subtitle={appSummary ? `${appSummary.managed_count} managed · ${appSummary.unmanaged_count} unmanaged` : undefined} onClick={() => navigate('/applications')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<WarningIcon fontSize="large" />} value={summary?.stale_devices ?? 0} label="Stale Devices" color="#f57c00" loading={loading} subtitle={summary ? `Avg check-in: ${summary.avg_patch_days}d` : undefined} />
+          <KpiCard icon={<WarningIcon fontSize="large" />} value={summary?.stale_devices ?? 0} label="Stale Devices" color="#f57c00" loading={loading} subtitle={summary ? `Avg check-in: ${summary.avg_patch_days}d` : undefined} onClick={() => navigate('/devices?compliance_status=unknown')} />
         </Grid>
       </Grid>
 
@@ -617,10 +607,21 @@ const DashboardPage: React.FC = () => {
               ) : attentionItems.length > 0 ? (
                 <Box sx={{ overflow: 'auto', flex: 1 }}>
                   {attentionItems.slice(0, 8).map((item, i) => (
-                    <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, py: 0.75, borderBottom: i < Math.min(attentionItems.length, 8) - 1 ? '1px solid #f0f0f0' : 'none' }}>
+                    <Box
+                      key={i}
+                      sx={{
+                        display: 'flex', alignItems: 'flex-start', gap: 1, py: 0.75,
+                        borderBottom: i < Math.min(attentionItems.length, 8) - 1 ? '1px solid #f0f0f0' : 'none',
+                        cursor: item.link ? 'pointer' : 'default',
+                        borderRadius: 0.5,
+                        '&:hover': item.link ? { bgcolor: '#f5f5f5' } : {},
+                        px: 0.5,
+                      }}
+                      onClick={() => item.link && navigate(item.link)}
+                    >
                       <Box sx={{ width: 8, height: 8, borderRadius: '50%', mt: 0.8, flexShrink: 0, bgcolor: item.severity === 'critical' ? '#d32f2f' : item.severity === 'warning' ? '#f57c00' : '#1976d2' }} />
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" color="text.secondary">{item.message}</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={item.link ? { '&:hover': { color: '#1a237e', textDecoration: 'underline' } } : {}}>{item.message}</Typography>
                       </Box>
                       <Chip size="small" label={item.category} sx={{ fontSize: '0.65rem', height: 20, bgcolor: '#f5f5f5', color: '#666' }} />
                     </Box>
@@ -643,9 +644,9 @@ const DashboardPage: React.FC = () => {
                 <ShieldIcon sx={{ color: '#1a237e' }} />
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>Security Posture</Typography>
               </Box>
-              <PostureBar label="Disk Encryption" icon={<LockIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.encryption_enabled ?? 0} disabled={posture?.encryption_disabled ?? 0} unknown={posture?.encryption_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} />
-              <PostureBar label="Firewall" icon={<ShieldIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.firewall_enabled ?? 0} disabled={posture?.firewall_disabled ?? 0} unknown={posture?.firewall_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} />
-              <PostureBar label="Antivirus" icon={<SecurityIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.antivirus_active ?? 0} disabled={posture?.antivirus_inactive ?? 0} unknown={posture?.antivirus_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} />
+              <PostureBar label="Disk Encryption" icon={<LockIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.encryption_enabled ?? 0} disabled={posture?.encryption_disabled ?? 0} unknown={posture?.encryption_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} onClickDisabled={() => navigate('/devices?encryption_enabled=false')} />
+              <PostureBar label="Firewall" icon={<ShieldIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.firewall_enabled ?? 0} disabled={posture?.firewall_disabled ?? 0} unknown={posture?.firewall_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} onClickDisabled={() => navigate('/devices?firewall_enabled=false')} />
+              <PostureBar label="Antivirus" icon={<SecurityIcon sx={{ fontSize: 18, color: '#666' }} />} enabled={posture?.antivirus_active ?? 0} disabled={posture?.antivirus_inactive ?? 0} unknown={posture?.antivirus_unknown ?? 0} total={posture?.total_devices ?? 0} loading={loading} onClickDisabled={() => navigate('/devices?antivirus_active=false')} />
             </CardContent>
           </Card>
         </Grid>
@@ -831,12 +832,13 @@ const DashboardPage: React.FC = () => {
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
-                    <Pie data={complianceData} cx="50%" cy="50%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                    <Pie data={complianceData} cx="50%" cy="45%" innerRadius={45} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} fontSize={11}>
                       {complianceData.map((entry) => (
                         <Cell key={entry.name} fill={COMPLIANCE_COLORS[entry.name.toLowerCase().replace('-', '_')] || '#9e9e9e'} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value: any) => [`${value} devices`]} />
+                    <Legend wrapperStyle={{ fontSize: '11px' }} />
                   </PieChart>
                 </ResponsiveContainer>
               )}
@@ -1069,7 +1071,7 @@ const DashboardPage: React.FC = () => {
                           ? Math.floor((Date.now() - new Date(device.last_checkin).getTime()) / (1000 * 60 * 60 * 24))
                           : null;
                         return (
-                          <TableRow key={device.id} hover>
+                          <TableRow key={device.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/devices/${device.id}`)}>
                             <TableCell sx={{ py: 0.75, fontWeight: 500 }}>{device.hostname || 'N/A'}</TableCell>
                             <TableCell sx={{ py: 0.75 }}>{device.platform || 'N/A'}</TableCell>
                             <TableCell sx={{ py: 0.75 }}>{device.os_version || 'N/A'}</TableCell>
