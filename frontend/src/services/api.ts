@@ -172,7 +172,14 @@ export interface FleetAppQueryParams {
 }
 
 export interface Credential {
+  id: string;
   provider: string;
+  is_active: boolean;
+  last_synced_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  credentials_masked: Record<string, string>;
+  // Computed helpers for the frontend
   configured: boolean;
   last_synced: string | null;
   fields: Record<string, string>;
@@ -413,7 +420,13 @@ export async function getOsCurrency(): Promise<OsCurrency> {
 
 export async function getCredentials(): Promise<Credential[]> {
   const response = await api.get('/credentials');
-  return response.data;
+  // Transform backend CredentialResponse to frontend Credential
+  return response.data.map((c: any) => ({
+    ...c,
+    configured: c.is_active && Object.keys(c.credentials_masked || {}).length > 0,
+    last_synced: c.last_synced_at,
+    fields: c.credentials_masked || {},
+  }));
 }
 
 export async function saveCredential(provider: string, credentials: Record<string, string>): Promise<void> {

@@ -110,7 +110,11 @@ class QualysAdapter(BaseAdapter):
         return hosts
 
     def _parse_vuln_xml(self, xml_text: str, host_id_map: dict[str, str]) -> list[dict]:
-        """Parse Qualys vulnerability/detection XML response."""
+        """Parse Qualys vulnerability/detection XML response.
+
+        Each vulnerability includes hostname and IP so the sync service can
+        match it to devices from Intune/Kandji (not by Qualys source_id).
+        """
         vulns = []
         try:
             root = ET.fromstring(xml_text)
@@ -123,7 +127,7 @@ class QualysAdapter(BaseAdapter):
         for host in host_list:
             host_ip = self._xml_text(host, "IP")
             host_id = self._xml_text(host, "ID")
-            source_id = host_id or host_ip or ""
+            hostname = self._xml_text(host, "DNS") or self._xml_text(host, "DNS_DATA/HOSTNAME") or self._xml_text(host, "NETBIOS")
 
             detection_list = host.findall(".//DETECTION")
             for detection in detection_list:
@@ -141,7 +145,9 @@ class QualysAdapter(BaseAdapter):
                     status = "open"
 
                 vuln = {
-                    "device_source_id": source_id,
+                    "device_source_id": host_id or host_ip or "",
+                    "hostname": hostname,
+                    "ip_address": host_ip,
                     "qid": qid,
                     "cve_id": self._xml_text(detection, "CVE_ID"),
                     "title": self._xml_text(detection, "TITLE") or f"QID {qid}",
@@ -183,30 +189,9 @@ class QualysAdapter(BaseAdapter):
             return False
 
     async def sync_devices(self) -> list[dict[str, Any]]:
-        """Fetch host assets from Qualys."""
-        logger.info("Starting Qualys host asset sync")
-        url = f"{self.base_url}/api/2.0/fo/asset/host/"
-        params = {
-            "action": "list",
-            "details": "All",
-            "truncation_limit": "0",  # Get all hosts
-        }
-        headers = {"X-Requested-With": "Python httpx"}
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.get(url, auth=self._get_auth(), params=params, headers=headers)
-                response.raise_for_status()
-                devices = self._parse_host_xml(response.text)
-        except httpx.HTTPStatusError as e:
-            logger.error("Qualys host sync HTTP error: %s %s", e.response.status_code, e.response.text[:500])
-            raise
-        except Exception as e:
-            logger.error("Qualys host sync error: %s", str(e))
-            raise
-
-        logger.info("Qualys sync fetched %d hosts", len(devices))
-        return devices
+        """Qualys is a vulnerability scanner — devices come from Intune/Kandji, not Qualys."""
+        logger.info("Qualys does not manage devices; skipping device sync")
+        return []
 
     async def sync_apps(self) -> list[dict[str, Any]]:
         """Qualys does not natively track installed apps. Return empty list."""

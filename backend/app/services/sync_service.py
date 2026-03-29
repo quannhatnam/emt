@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import BaseAdapter
@@ -121,6 +121,37 @@ class SyncService:
             db.add(device)
             return device
 
+    @staticmethod
+    async def _match_vuln_to_device(
+        db: AsyncSession, hostname: str | None, ip_address: str | None
+    ) -> Device | None:
+        """Match a Qualys vulnerability to a device from Intune/Kandji by hostname or IP."""
+        # Try hostname match first (case-insensitive)
+        if hostname:
+            result = await db.execute(
+                select(Device).where(
+                    func.lower(Device.hostname) == hostname.lower(),
+                    Device.source.in_(["intune", "kandji"]),
+                )
+            )
+            device = result.scalar_one_or_none()
+            if device:
+                return device
+
+        # Fall back to IP address match
+        if ip_address:
+            result = await db.execute(
+                select(Device).where(
+                    Device.ip_address == ip_address,
+                    Device.source.in_(["intune", "kandji"]),
+                )
+            )
+            device = result.scalar_one_or_none()
+            if device:
+                return device
+
+        return None
+
     async def sync_provider(self, provider: str, db: AsyncSession) -> SyncLog:
         """Perform a full sync for a single provider."""
         logger.info("Starting sync for provider: %s", provider)
@@ -143,7 +174,7 @@ class SyncService:
 
             adapter = self._get_adapter(provider, credentials)
 
-            # Sync devices
+            # Sync devices (Intune/Kandji only — Qualys returns empty list)
             device_data_list = await adapter.sync_devices()
             devices_synced = 0
             source_id_to_device: dict[str, Device] = {}
@@ -155,12 +186,6 @@ class SyncService:
                 devices_synced += 1
 
             await db.flush()
-
-            # Build a map from source_id to device.id for app/vuln linking
-            # Re-query to get IDs for newly created devices
-            for source_id, device in source_id_to_device.items():
-                if not device.id:
-                    await db.flush()
 
             # Collect all device IDs that were synced for deduplication
             synced_device_ids = [d.id for d in source_id_to_device.values() if d.id]
@@ -183,27 +208,66 @@ class SyncService:
                             **app_data,
                         )
                         db.add(app_entry)
+                if app_data_list:
+                    logger.info("Synced %d app entries for %s", len(app_data_list), provider)
             except Exception as e:
                 logger.warning("App sync failed for %s: %s", provider, str(e))
 
-            # Sync vulnerabilities — delete old vulns for synced devices first to avoid duplicates
+            # Sync vulnerabilities
             try:
                 vuln_data_list = await adapter.sync_vulnerabilities()
-                if vuln_data_list and synced_device_ids:
+                vulns_matched = 0
+
+                if provider == "qualys" and vuln_data_list:
+                    # Qualys vulns: match to Intune/Kandji devices by hostname or IP
+                    # First, delete all existing Qualys vulns to avoid duplicates
                     await db.execute(
-                        delete(Vulnerability).where(Vulnerability.device_id.in_(synced_device_ids))
+                        delete(Vulnerability).where(Vulnerability.source == "qualys")
                     )
                     await db.flush()
-                for vuln_data in vuln_data_list:
-                    device_source_id = vuln_data.pop("device_source_id", None)
-                    if device_source_id and device_source_id in source_id_to_device:
-                        device = source_id_to_device[device_source_id]
+
+                    for vuln_data in vuln_data_list:
+                        vuln_hostname = vuln_data.pop("hostname", None)
+                        vuln_ip = vuln_data.pop("ip_address", None)
+                        vuln_data.pop("device_source_id", None)
+
+                        device = await self._match_vuln_to_device(db, vuln_hostname, vuln_ip)
                         vuln_entry = Vulnerability(
                             id=str(uuid.uuid4()),
-                            device_id=device.id,
+                            device_id=device.id if device else None,
+                            source="qualys",
                             **vuln_data,
                         )
                         db.add(vuln_entry)
+                        if device:
+                            vulns_matched += 1
+
+                    logger.info(
+                        "Qualys: %d vulns total, %d matched to devices",
+                        len(vuln_data_list), vulns_matched,
+                    )
+                elif vuln_data_list and synced_device_ids:
+                    # Non-Qualys provider vulns (Intune/Kandji don't have vulns, but keep generic)
+                    await db.execute(
+                        delete(Vulnerability).where(
+                            Vulnerability.device_id.in_(synced_device_ids),
+                            Vulnerability.source == provider,
+                        )
+                    )
+                    await db.flush()
+                    for vuln_data in vuln_data_list:
+                        device_source_id = vuln_data.pop("device_source_id", None)
+                        vuln_data.pop("hostname", None)
+                        vuln_data.pop("ip_address", None)
+                        if device_source_id and device_source_id in source_id_to_device:
+                            device = source_id_to_device[device_source_id]
+                            vuln_entry = Vulnerability(
+                                id=str(uuid.uuid4()),
+                                device_id=device.id,
+                                source=provider,
+                                **vuln_data,
+                            )
+                            db.add(vuln_entry)
             except Exception as e:
                 logger.warning("Vulnerability sync failed for %s: %s", provider, str(e))
 

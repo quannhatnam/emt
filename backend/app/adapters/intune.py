@@ -159,33 +159,61 @@ class IntuneAdapter(BaseAdapter):
         return devices
 
     async def sync_apps(self) -> list[dict[str, Any]]:
-        """Fetch detected apps from Intune."""
+        """Fetch detected apps from Intune.
+
+        Uses /deviceManagement/detectedApps with $expand to get device associations.
+        If $expand fails (permission issue), falls back to fetching per-app device lists.
+        """
         logger.info("Starting Intune app sync")
+
+        # First try with $expand (requires DetectedApps permissions)
         url = f"{GRAPH_BASE_URL}/deviceManagement/detectedApps"
-        params = {"$top": "100", "$expand": "managedDevices($select=id)"}
+        params = {"$top": "100"}
 
         try:
             raw_apps = await self._paginated_get(url, params)
         except httpx.HTTPStatusError as e:
             logger.error("Intune app sync HTTP error: %s %s", e.response.status_code, e.response.text)
             raise
-        except Exception as e:
-            logger.error("Intune app sync error: %s", str(e))
-            raise
 
         apps = []
-        for a in raw_apps:
-            managed_devices = a.get("managedDevices", [])
-            for md in managed_devices:
-                app_entry = {
-                    "device_source_id": md.get("id", ""),
-                    "name": a.get("displayName", "Unknown"),
-                    "version": a.get("version"),
-                    "publisher": a.get("publisher"),
-                    "is_managed": a.get("mobileAppIdentifier") is not None or "managedApp" in a.get("@odata.type", "").lower(),
-                    "source": "intune",
-                }
-                apps.append(app_entry)
+        headers = await self._get_headers()
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for a in raw_apps:
+                app_id = a.get("id", "")
+                app_name = a.get("displayName", "Unknown")
+                app_version = a.get("version")
+                app_publisher = a.get("publisher")
+
+                # If managed devices were included via $expand, use them
+                managed_devices = a.get("managedDevices")
+
+                # Otherwise fetch the device list for this app
+                if managed_devices is None and app_id:
+                    try:
+                        dev_url = f"{GRAPH_BASE_URL}/deviceManagement/detectedApps/{app_id}/managedDevices"
+                        response = await client.get(dev_url, headers=headers, params={"$select": "id"})
+                        if response.status_code == 200:
+                            managed_devices = response.json().get("value", [])
+                        else:
+                            managed_devices = []
+                    except Exception as e:
+                        logger.debug("Failed to fetch devices for app %s: %s", app_name, str(e))
+                        managed_devices = []
+
+                for md in (managed_devices or []):
+                    device_id = md.get("id", "")
+                    if device_id:
+                        app_entry = {
+                            "device_source_id": device_id,
+                            "name": app_name,
+                            "version": app_version,
+                            "publisher": app_publisher,
+                            "is_managed": False,
+                            "source": "intune",
+                        }
+                        apps.append(app_entry)
 
         logger.info("Intune sync fetched %d app-device associations", len(apps))
         return apps

@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-@router.get("", response_model=list[DeviceResponse])
+@router.get("")
 async def list_devices(
-    source: Optional[str] = Query(None, description="Filter by source (intune/kandji/qualys)"),
+    source: Optional[str] = Query(None, description="Filter by source (intune/kandji)"),
     platform: Optional[str] = Query(None, description="Filter by platform"),
     compliance_status: Optional[str] = Query(None, description="Filter by compliance status"),
     search: Optional[str] = Query(None, description="Search by hostname, serial number, or assigned user"),
@@ -35,17 +35,17 @@ async def list_devices(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    query = select(Device)
+    base_query = select(Device)
 
     if source:
-        query = query.where(Device.source == source)
+        base_query = base_query.where(Device.source == source)
     if platform:
-        query = query.where(Device.platform == platform)
+        base_query = base_query.where(Device.platform == platform)
     if compliance_status:
-        query = query.where(Device.compliance_status == compliance_status)
+        base_query = base_query.where(Device.compliance_status == compliance_status)
     if search:
         search_term = f"%{search}%"
-        query = query.where(
+        base_query = base_query.where(
             or_(
                 Device.hostname.ilike(search_term),
                 Device.serial_number.ilike(search_term),
@@ -54,18 +54,29 @@ async def list_devices(
             )
         )
 
+    # Get total count with same filters
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
     # Sorting
     sort_column = getattr(Device, sort_by, Device.hostname)
     if sort_order == "desc":
-        query = query.order_by(sort_column.desc())
+        base_query = base_query.order_by(sort_column.desc())
     else:
-        query = query.order_by(sort_column.asc())
+        base_query = base_query.order_by(sort_column.asc())
 
-    query = query.offset(skip).limit(limit)
+    base_query = base_query.offset(skip).limit(limit)
 
-    result = await db.execute(query)
+    result = await db.execute(base_query)
     devices = result.scalars().all()
-    return devices
+
+    return {
+        "items": [DeviceResponse.model_validate(d) for d in devices],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.get("/stale", response_model=list[DeviceResponse])
