@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -334,10 +335,10 @@ function buildAttentionItems(
       totalBehind += p.behind || 0;
     });
     if (totalCritical > 0) {
-      items.push({ severity: 'critical', message: `${totalCritical} devices running critically outdated OS (N-2 or older)`, category: 'Patch' });
+      items.push({ severity: 'critical', message: `${totalCritical} devices running critically outdated OS (2+ versions behind)`, category: 'Patch' });
     }
     if (totalBehind > 0) {
-      items.push({ severity: 'warning', message: `${totalBehind} devices on N-1 OS version — schedule updates`, category: 'Patch' });
+      items.push({ severity: 'warning', message: `${totalBehind} devices on previous OS version — schedule updates`, category: 'Patch' });
     }
   }
 
@@ -473,7 +474,10 @@ const DashboardPage: React.FC = () => {
     : [];
 
   const platformData = summary
-    ? Object.entries(summary.os_distribution || {}).map(([name, value]) => ({ name, value }))
+    ? Object.entries(summary.os_distribution || {}).map(([name, value]) => ({
+        name: PLATFORM_LABELS[name.toLowerCase()] || name.charAt(0).toUpperCase() + name.slice(1),
+        value,
+      }))
     : [];
 
   const complianceData = summary
@@ -507,13 +511,23 @@ const DashboardPage: React.FC = () => {
 
   const attentionItems = buildAttentionItems(summary, posture, osCurrency, vulnSummary, syncLogs, appSummary);
 
+  // Platform name mapping for human-readable labels
+  const PLATFORM_LABELS: Record<string, string> = {
+    macos: 'macOS',
+    windows: 'Windows',
+    ios: 'iOS',
+    android: 'Android',
+    linux: 'Linux',
+    unknown: 'Unknown',
+  };
+
   // Build OS currency stacked bar data
   const osCurrencyBarData = osCurrency
     ? Object.entries(osCurrency.platforms).map(([platform, data]: [string, any]) => ({
-        platform: platform.charAt(0).toUpperCase() + platform.slice(1),
-        Current: data.current,
-        'N-1': data.behind,
-        Outdated: data.critical,
+        platform: PLATFORM_LABELS[platform.toLowerCase()] || platform.charAt(0).toUpperCase() + platform.slice(1),
+        'Latest Version': data.current,
+        'Previous Version': data.behind,
+        '2+ Versions Behind': data.critical,
         Unknown: data.unknown,
         total: data.total,
         latest: data.latest_version,
@@ -703,9 +717,9 @@ const DashboardPage: React.FC = () => {
                     <YAxis type="category" dataKey="platform" fontSize={12} width={70} />
                     <Tooltip formatter={(value: any, name: any) => [`${value} devices`, String(name)]} />
                     <Legend />
-                    <Bar dataKey="Current" stackId="os" fill="#388e3c" radius={0} barSize={28} />
-                    <Bar dataKey="N-1" stackId="os" fill="#f57c00" radius={0} barSize={28} />
-                    <Bar dataKey="Outdated" stackId="os" fill="#d32f2f" radius={0} barSize={28} />
+                    <Bar dataKey="Latest Version" stackId="os" fill="#388e3c" radius={0} barSize={28} />
+                    <Bar dataKey="Previous Version" stackId="os" fill="#f57c00" radius={0} barSize={28} />
+                    <Bar dataKey="2+ Versions Behind" stackId="os" fill="#d32f2f" radius={0} barSize={28} />
                     <Bar dataKey="Unknown" stackId="os" fill="#bdbdbd" radius={0} barSize={28} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -746,7 +760,7 @@ const DashboardPage: React.FC = () => {
                             <TableCell sx={{ py: 0.75 }}>
                               <Chip
                                 size="small"
-                                label={v.status === 'current' ? 'Current' : v.status === 'behind' ? 'N-1' : v.status === 'critical' ? 'Outdated' : 'Unknown'}
+                                label={v.status === 'current' ? 'Latest' : v.status === 'behind' ? 'Previous' : v.status === 'critical' ? 'Outdated' : 'Unknown'}
                                 sx={{ bgcolor: `${OS_STATUS_COLORS[v.status] || '#9e9e9e'}18`, color: OS_STATUS_COLORS[v.status] || '#9e9e9e', fontWeight: 600, fontSize: '0.7rem' }}
                               />
                             </TableCell>
@@ -979,12 +993,13 @@ const DashboardPage: React.FC = () => {
               ) : platformData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
-                    <Pie data={platformData} cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                    <Pie data={platformData} cx="50%" cy="45%" innerRadius={45} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} fontSize={11}>
                       {platformData.map((entry, index) => (
                         <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value: any) => [`${value} devices`]} />
+                    <Legend wrapperStyle={{ fontSize: '11px' }} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
@@ -1006,12 +1021,13 @@ const DashboardPage: React.FC = () => {
               ) : sourceData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
-                    <Pie data={sourceData} cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                    <Pie data={sourceData} cx="50%" cy="45%" innerRadius={45} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} fontSize={11}>
                       {sourceData.map((entry, index) => (
                         <Cell key={entry.name} fill={SOURCE_COLORS[entry.name.toLowerCase()] || PIE_COLORS[index % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value: any) => [`${value} devices`]} />
+                    <Legend wrapperStyle={{ fontSize: '11px' }} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (

@@ -54,6 +54,10 @@ export interface DeviceQueryParams {
   source?: string;
   platform?: string;
   compliance_status?: string;
+  encryption_enabled?: boolean;
+  firewall_enabled?: boolean;
+  antivirus_active?: boolean;
+  is_managed?: boolean;
   skip?: number;
   limit?: number;
   sort_by?: string;

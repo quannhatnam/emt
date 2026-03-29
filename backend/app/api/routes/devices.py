@@ -28,6 +28,10 @@ async def list_devices(
     platform: Optional[str] = Query(None, description="Filter by platform"),
     compliance_status: Optional[str] = Query(None, description="Filter by compliance status"),
     search: Optional[str] = Query(None, description="Search by hostname, serial number, or assigned user"),
+    encryption_enabled: Optional[bool] = Query(None, description="Filter by encryption status"),
+    firewall_enabled: Optional[bool] = Query(None, description="Filter by firewall status"),
+    antivirus_active: Optional[bool] = Query(None, description="Filter by antivirus status"),
+    is_managed: Optional[bool] = Query(None, description="Filter by managed status"),
     sort_by: Optional[str] = Query("hostname", description="Sort field"),
     sort_order: Optional[str] = Query("asc", description="Sort order: asc or desc"),
     skip: int = Query(0, ge=0),
@@ -53,6 +57,14 @@ async def list_devices(
                 Device.assigned_user_email.ilike(search_term),
             )
         )
+    if encryption_enabled is not None:
+        base_query = base_query.where(Device.encryption_enabled == encryption_enabled)
+    if firewall_enabled is not None:
+        base_query = base_query.where(Device.firewall_enabled == firewall_enabled)
+    if antivirus_active is not None:
+        base_query = base_query.where(Device.antivirus_active == antivirus_active)
+    if is_managed is not None:
+        base_query = base_query.where(Device.is_managed == is_managed)
 
     # Get total count with same filters
     count_query = select(func.count()).select_from(base_query.subquery())
