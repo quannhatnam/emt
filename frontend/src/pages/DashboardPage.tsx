@@ -106,6 +106,17 @@ const OS_STATUS_COLORS: Record<string, string> = {
 
 const PIE_COLORS = ['#1976d2', '#7b1fa2', '#e64a19', '#388e3c', '#f57c00', '#00897b'];
 
+const PLATFORM_LABELS: Record<string, string> = {
+  macos: 'macOS',
+  windows: 'Windows',
+  ios: 'iOS',
+  android: 'Android',
+  linux: 'Linux',
+  unknown: 'Unknown',
+};
+
+const SOURCE_LABELS: Record<string, string> = { intune: 'Intune', kandji: 'Kandji', qualys: 'Qualys' };
+
 // --- Reusable Components ---
 interface KpiCardProps {
   icon: React.ReactNode;
@@ -457,7 +468,6 @@ const DashboardPage: React.FC = () => {
   const healthScore = computeHealthScore(summary, vulnSummary, posture, osCurrency, appSummary);
   const health = getHealthLabel(healthScore);
 
-  const SOURCE_LABELS: Record<string, string> = { intune: 'Intune', kandji: 'Kandji', qualys: 'Qualys' };
   const sourceData = summary
     ? Object.entries(summary.source_distribution || {}).map(([name, value]) => ({ name: SOURCE_LABELS[name.toLowerCase()] || name.charAt(0).toUpperCase() + name.slice(1), value }))
     : [];
@@ -500,16 +510,6 @@ const DashboardPage: React.FC = () => {
   syncLogs.forEach((log) => { if (!latestSyncs[log.provider]) latestSyncs[log.provider] = log; });
 
   const attentionItems = buildAttentionItems(summary, posture, osCurrency, vulnSummary, syncLogs, appSummary);
-
-  // Platform name mapping for human-readable labels
-  const PLATFORM_LABELS: Record<string, string> = {
-    macos: 'macOS',
-    windows: 'Windows',
-    ios: 'iOS',
-    android: 'Android',
-    linux: 'Linux',
-    unknown: 'Unknown',
-  };
 
   // Build OS currency stacked bar data
   const osCurrencyBarData = osCurrency
