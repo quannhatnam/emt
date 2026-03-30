@@ -174,6 +174,17 @@ class SyncService:
 
             adapter = self._get_adapter(provider, credentials)
 
+            # Clean up any legacy Qualys device records — Qualys is vulnerability-only
+            if provider == "qualys":
+                qualys_device_count = await db.execute(
+                    select(func.count(Device.id)).where(Device.source == "qualys")
+                )
+                count = qualys_device_count.scalar() or 0
+                if count > 0:
+                    logger.info("Removing %d legacy Qualys device records (Qualys is vulnerability-only)", count)
+                    await db.execute(delete(Device).where(Device.source == "qualys"))
+                    await db.flush()
+
             # Sync devices (Intune/Kandji only — Qualys returns empty list)
             device_data_list = await adapter.sync_devices()
             devices_synced = 0

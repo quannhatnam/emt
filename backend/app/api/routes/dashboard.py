@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
+# Qualys is vulnerability-only — never count Qualys hosts as devices
+DEVICE_SOURCES = ["intune", "kandji"]
+_device_source_filter = Device.source.in_(DEVICE_SOURCES)
+
 
 @router.get("/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
@@ -36,18 +40,20 @@ async def get_dashboard_summary(
     now = datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=7)
 
-    # Total devices
-    total_result = await db.execute(select(func.count(Device.id)))
+    # Total devices (Intune/Kandji only — Qualys is vulnerability-only)
+    total_result = await db.execute(
+        select(func.count(Device.id)).where(_device_source_filter)
+    )
     total_devices = total_result.scalar() or 0
 
     # Compliance counts
     compliant_result = await db.execute(
-        select(func.count(Device.id)).where(Device.compliance_status == "compliant")
+        select(func.count(Device.id)).where(Device.compliance_status == "compliant", _device_source_filter)
     )
     compliant_count = compliant_result.scalar() or 0
 
     non_compliant_result = await db.execute(
-        select(func.count(Device.id)).where(Device.compliance_status == "non_compliant")
+        select(func.count(Device.id)).where(Device.compliance_status == "non_compliant", _device_source_filter)
     )
     non_compliant_count = non_compliant_result.scalar() or 0
 
@@ -69,7 +75,8 @@ async def get_dashboard_summary(
     # Stale devices (no check-in > 7 days)
     stale_result = await db.execute(
         select(func.count(Device.id)).where(
-            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None))
+            _device_source_filter,
+            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None)),
         )
     )
     stale_devices = stale_result.scalar() or 0
@@ -78,19 +85,19 @@ async def get_dashboard_summary(
     avg_patch_result = await db.execute(
         select(func.avg(
             func.julianday(func.datetime("now")) - func.julianday(Device.last_checkin)
-        )).where(Device.last_checkin.isnot(None))
+        )).where(Device.last_checkin.isnot(None), _device_source_filter)
     )
     avg_patch_days = avg_patch_result.scalar() or 0.0
 
     # OS distribution
     os_result = await db.execute(
-        select(Device.platform, func.count(Device.id)).group_by(Device.platform)
+        select(Device.platform, func.count(Device.id)).where(_device_source_filter).group_by(Device.platform)
     )
     os_distribution = {row[0] or "unknown": row[1] for row in os_result.all()}
 
     # Source distribution
     source_result = await db.execute(
-        select(Device.source, func.count(Device.id)).group_by(Device.source)
+        select(Device.source, func.count(Device.id)).where(_device_source_filter).group_by(Device.source)
     )
     source_distribution = {row[0]: row[1] for row in source_result.all()}
 
@@ -112,13 +119,13 @@ async def get_os_distribution(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    # More detailed: platform + os_version
+    # More detailed: platform + os_version (Intune/Kandji only)
     result = await db.execute(
         select(
             func.coalesce(Device.platform, "unknown"),
             func.coalesce(Device.os_version, "unknown"),
             func.count(Device.id),
-        ).group_by(Device.platform, Device.os_version)
+        ).where(_device_source_filter).group_by(Device.platform, Device.os_version)
     )
     distribution = {}
     for platform, os_version, count in result.all():
@@ -233,32 +240,32 @@ async def get_security_posture(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    """Encryption, firewall, and antivirus status across all devices."""
-    total_result = await db.execute(select(func.count(Device.id)))
+    """Encryption, firewall, and antivirus status across managed devices (Intune/Kandji)."""
+    total_result = await db.execute(select(func.count(Device.id)).where(_device_source_filter))
     total = total_result.scalar() or 0
 
     # Encryption
     enc_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.encryption_enabled == True)
+        select(func.count(Device.id)).where(Device.encryption_enabled == True, _device_source_filter)
     )).scalar() or 0
     enc_off = (await db.execute(
-        select(func.count(Device.id)).where(Device.encryption_enabled == False)
+        select(func.count(Device.id)).where(Device.encryption_enabled == False, _device_source_filter)
     )).scalar() or 0
 
     # Firewall
     fw_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.firewall_enabled == True)
+        select(func.count(Device.id)).where(Device.firewall_enabled == True, _device_source_filter)
     )).scalar() or 0
     fw_off = (await db.execute(
-        select(func.count(Device.id)).where(Device.firewall_enabled == False)
+        select(func.count(Device.id)).where(Device.firewall_enabled == False, _device_source_filter)
     )).scalar() or 0
 
     # Antivirus
     av_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.antivirus_active == True)
+        select(func.count(Device.id)).where(Device.antivirus_active == True, _device_source_filter)
     )).scalar() or 0
     av_off = (await db.execute(
-        select(func.count(Device.id)).where(Device.antivirus_active == False)
+        select(func.count(Device.id)).where(Device.antivirus_active == False, _device_source_filter)
     )).scalar() or 0
 
     return SecurityPosture(
@@ -316,7 +323,7 @@ async def get_os_currency(
             func.coalesce(Device.platform, "unknown"),
             func.coalesce(Device.os_version, "unknown"),
             func.count(Device.id),
-        ).group_by(Device.platform, Device.os_version)
+        ).where(_device_source_filter).group_by(Device.platform, Device.os_version)
     )
     rows = result.all()
 

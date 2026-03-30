@@ -39,7 +39,8 @@ async def list_devices(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    base_query = select(Device)
+    # Devices only come from Intune/Kandji — Qualys is vulnerability-only
+    base_query = select(Device).where(Device.source.in_(["intune", "kandji"]))
 
     if source:
         base_query = base_query.where(Device.source == source)
@@ -103,10 +104,11 @@ async def list_stale_devices(
     query = (
         select(Device)
         .where(
+            Device.source.in_(["intune", "kandji"]),
             or_(
                 Device.last_checkin < cutoff,
                 Device.last_checkin.is_(None),
-            )
+            ),
         )
         .order_by(Device.last_checkin.asc())
         .offset(skip)
