@@ -54,7 +54,6 @@ import {
 } from 'recharts';
 import {
   getDashboardSummary,
-  getOsDistribution,
   getVulnerabilitySummary,
   getStaleDevices,
   getComplianceTrend,
@@ -64,7 +63,6 @@ import {
   getSyncLogs,
   getAppSummary,
   DashboardSummary,
-  OsDistribution,
   VulnerabilitySummary,
   ComplianceTrend,
   VulnerabilityTrend,
@@ -387,8 +385,6 @@ function buildAttentionItems(
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [osDistribution, setOsDistribution] = useState<OsDistribution[]>([]);
   const [vulnSummary, setVulnSummary] = useState<VulnerabilitySummary | null>(null);
   const [staleDevices, setStaleDevices] = useState<Device[]>([]);
   const [complianceTrend, setComplianceTrend] = useState<ComplianceTrend[]>([]);
@@ -404,9 +400,8 @@ const DashboardPage: React.FC = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [summaryData, osData, vulnData, staleData, trendData, vulnTrendData, postureData, osCurrencyData, logsData, appSummaryData] = await Promise.all([
+      const [summaryData, vulnData, staleData, trendData, vulnTrendData, postureData, osCurrencyData, logsData, appSummaryData] = await Promise.all([
         getDashboardSummary(),
-        getOsDistribution(),
         getVulnerabilitySummary(),
         getStaleDevices(),
         getComplianceTrend(trendDays),
@@ -417,7 +412,6 @@ const DashboardPage: React.FC = () => {
         getAppSummary(),
       ]);
       setSummary(summaryData);
-      setOsDistribution(osData);
       setVulnSummary(vulnData);
       setStaleDevices(staleData);
       setComplianceTrend(trendData);
@@ -497,15 +491,6 @@ const DashboardPage: React.FC = () => {
       ]
     : [];
 
-  // App management bar data (used for possible future charts)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const appMgmtData = appSummary
-    ? [
-        { name: 'Managed', value: appSummary.managed_count, fill: '#388e3c' },
-        { name: 'Unmanaged', value: appSummary.unmanaged_count, fill: '#f57c00' },
-      ]
-    : [];
-
   const latestSyncs: Record<string, SyncLog> = {};
   syncLogs.forEach((log) => { if (!latestSyncs[log.provider]) latestSyncs[log.provider] = log; });
 
@@ -577,10 +562,10 @@ const DashboardPage: React.FC = () => {
           <KpiCard icon={<CheckCircleIcon fontSize="large" />} value={summary && summary.total_devices > 0 ? `${((summary.compliant_count / summary.total_devices) * 100).toFixed(1)}%` : '0%'} label="Compliance Rate" color="#388e3c" loading={loading} subtitle={summary ? `${summary.compliant_count} of ${summary.total_devices}` : undefined} onClick={() => navigate('/devices?compliance_status=non_compliant')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<SystemUpdateIcon fontSize="large" />} value={osCurrency ? `${osCurrency.overall_currency_pct}%` : '0%'} label="OS Currency" color="#1565c0" loading={loading} subtitle="Devices on latest OS" />
+          <KpiCard icon={<SystemUpdateIcon fontSize="large" />} value={osCurrency ? `${osCurrency.overall_currency_pct}%` : '0%'} label="OS Currency" color="#1565c0" loading={loading} subtitle="Devices on latest OS" onClick={() => navigate('/devices')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-          <KpiCard icon={<BugReportIcon fontSize="large" />} value={summary?.critical_vulns ?? 0} label="Critical Vulns" color="#d32f2f" loading={loading} subtitle={vulnSummary ? `${vulnSummary.high} high · ${vulnSummary.medium} med` : undefined} />
+          <KpiCard icon={<BugReportIcon fontSize="large" />} value={summary?.critical_vulns ?? 0} label="Critical Vulns" color="#d32f2f" loading={loading} subtitle={vulnSummary ? `${vulnSummary.high} high · ${vulnSummary.medium} med` : undefined} onClick={() => navigate('/vulnerabilities')} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2 }}>
           <KpiCard icon={<AppsIcon fontSize="large" />} value={`${managedPct}%`} label="App Coverage" color="#7b1fa2" loading={loading} subtitle={appSummary ? `${appSummary.managed_count} managed · ${appSummary.unmanaged_count} unmanaged` : undefined} onClick={() => navigate('/applications')} />
@@ -667,7 +652,7 @@ const DashboardPage: React.FC = () => {
                     <Box key={provider} sx={{ p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 600, textTransform: 'capitalize' }}>{provider}</Typography>
-                        <Chip size="small" label={log.status} color={log.status === 'completed' ? 'success' : log.status === 'failed' ? 'error' : 'warning'} variant="outlined" />
+                        <Chip size="small" label={log.status} color={log.status === 'success' ? 'success' : log.status === 'failed' ? 'error' : 'warning'} variant="outlined" />
                       </Box>
                       <Typography variant="caption" color="text.secondary">
                         {formatTimeAgo(log.completed_at || log.started_at)} · {log.devices_synced} devices

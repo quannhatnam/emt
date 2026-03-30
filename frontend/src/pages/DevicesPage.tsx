@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -118,6 +118,8 @@ const DevicesPage: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [source, setSource] = useState(searchParams.get('source') || '');
   const [platform, setPlatform] = useState(searchParams.get('platform') || '');
   const [compliance, setCompliance] = useState(searchParams.get('compliance_status') || '');
@@ -129,11 +131,18 @@ const DevicesPage: React.FC = () => {
     pageSize: 25,
   });
 
+  // Debounce search input
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [search]);
+
   const fetchDevices = useCallback(async () => {
     setLoading(true);
     try {
       const result = await getDevices({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         source: source || undefined,
         platform: platform || undefined,
         compliance_status: compliance || undefined,
@@ -149,7 +158,7 @@ const DevicesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, source, platform, compliance, encryptionFilter, firewallFilter, antivirusFilter, paginationModel]);
+  }, [debouncedSearch, source, platform, compliance, encryptionFilter, firewallFilter, antivirusFilter, paginationModel]);
 
   useEffect(() => {
     fetchDevices();
@@ -163,9 +172,13 @@ const DevicesPage: React.FC = () => {
       'OS Version',
       'User',
       'Compliance',
+      'Encryption',
+      'Firewall',
+      'Antivirus',
       'Source',
       'Last Check-in',
     ];
+    const boolLabel = (v: boolean | null | undefined) => v === true ? 'Enabled' : v === false ? 'Disabled' : 'Unknown';
     const rows = data.items.map((d: Device) => [
       d.hostname,
       d.serial_number,
@@ -173,6 +186,9 @@ const DevicesPage: React.FC = () => {
       d.os_version,
       d.assigned_user,
       d.compliance_status,
+      boolLabel(d.encryption_enabled),
+      boolLabel(d.firewall_enabled),
+      boolLabel(d.antivirus_active),
       d.source,
       d.last_checkin,
     ]);

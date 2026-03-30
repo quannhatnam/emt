@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
+# Qualys is vulnerability-only — never count Qualys hosts as devices in reports
+DEVICE_SOURCES = ["intune", "kandji"]
+
 # Default export directory — override via EXPORT_DIR env var
 EXPORT_DIR = Path(os.environ.get("EXPORT_DIR", os.path.expanduser("~/emt")))
 
@@ -155,7 +158,9 @@ def _human_size(size_bytes: int) -> str:
 
 async def _generate_device_inventory(db: AsyncSession, export_dir: Path, ts: str) -> Path:
     """Full device inventory with all fields."""
-    result = await db.execute(select(Device).order_by(Device.hostname))
+    result = await db.execute(
+        select(Device).where(Device.source.in_(DEVICE_SOURCES)).order_by(Device.hostname)
+    )
     devices = result.scalars().all()
 
     filepath = export_dir / f"device_inventory_{ts}.csv"
@@ -185,7 +190,7 @@ async def _generate_device_inventory(db: AsyncSession, export_dir: Path, ts: str
 async def _generate_compliance_report(db: AsyncSession, export_dir: Path, ts: str) -> Path:
     """Compliance breakdown — non-compliant devices with details."""
     result = await db.execute(
-        select(Device).order_by(
+        select(Device).where(Device.source.in_(DEVICE_SOURCES)).order_by(
             case(
                 (Device.compliance_status == "non_compliant", 0),
                 (Device.compliance_status == "unknown", 1),
@@ -281,7 +286,7 @@ async def _generate_app_inventory(db: AsyncSession, export_dir: Path, ts: str) -
 async def _generate_security_posture(db: AsyncSession, export_dir: Path, ts: str) -> Path:
     """Per-device security posture (encryption, firewall, AV)."""
     result = await db.execute(
-        select(Device).order_by(Device.hostname)
+        select(Device).where(Device.source.in_(DEVICE_SOURCES)).order_by(Device.hostname)
     )
     devices = result.scalars().all()
 
@@ -326,7 +331,8 @@ async def _generate_stale_devices(db: AsyncSession, export_dir: Path, ts: str) -
     stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     result = await db.execute(
         select(Device).where(
-            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None))
+            Device.source.in_(DEVICE_SOURCES),
+            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None)),
         ).order_by(Device.last_checkin.asc().nullsfirst())
     )
     devices = result.scalars().all()
@@ -358,26 +364,27 @@ async def _generate_executive_summary(db: AsyncSession, export_dir: Path, ts: st
     now = datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=7)
 
-    # Total devices
-    total = (await db.execute(select(func.count(Device.id)))).scalar() or 0
+    # Total devices (Intune/Kandji only — Qualys is vulnerability-only)
+    _src = Device.source.in_(DEVICE_SOURCES)
+    total = (await db.execute(select(func.count(Device.id)).where(_src))).scalar() or 0
 
     # Compliance
     compliant = (await db.execute(
-        select(func.count(Device.id)).where(Device.compliance_status == "compliant")
+        select(func.count(Device.id)).where(Device.compliance_status == "compliant", _src)
     )).scalar() or 0
     non_compliant = (await db.execute(
-        select(func.count(Device.id)).where(Device.compliance_status == "non_compliant")
+        select(func.count(Device.id)).where(Device.compliance_status == "non_compliant", _src)
     )).scalar() or 0
 
     # Security posture
     enc_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.encryption_enabled == True)
+        select(func.count(Device.id)).where(Device.encryption_enabled == True, _src)
     )).scalar() or 0
     fw_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.firewall_enabled == True)
+        select(func.count(Device.id)).where(Device.firewall_enabled == True, _src)
     )).scalar() or 0
     av_on = (await db.execute(
-        select(func.count(Device.id)).where(Device.antivirus_active == True)
+        select(func.count(Device.id)).where(Device.antivirus_active == True, _src)
     )).scalar() or 0
 
     # Vulnerabilities
@@ -398,7 +405,8 @@ async def _generate_executive_summary(db: AsyncSession, export_dir: Path, ts: st
     # Stale
     stale = (await db.execute(
         select(func.count(Device.id)).where(
-            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None))
+            _src,
+            (Device.last_checkin < stale_cutoff) | (Device.last_checkin.is_(None)),
         )
     )).scalar() or 0
 
@@ -410,13 +418,13 @@ async def _generate_executive_summary(db: AsyncSession, export_dir: Path, ts: st
 
     # Platform distribution
     platform_result = await db.execute(
-        select(Device.platform, func.count(Device.id)).group_by(Device.platform)
+        select(Device.platform, func.count(Device.id)).where(_src).group_by(Device.platform)
     )
     platforms = {(row[0] or "unknown"): row[1] for row in platform_result.all()}
 
     # Source distribution
     source_result = await db.execute(
-        select(Device.source, func.count(Device.id)).group_by(Device.source)
+        select(Device.source, func.count(Device.id)).where(_src).group_by(Device.source)
     )
     sources = {row[0]: row[1] for row in source_result.all()}
 
